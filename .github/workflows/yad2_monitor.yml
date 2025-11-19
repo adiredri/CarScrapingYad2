@@ -1,0 +1,90 @@
+name: Yad2 Car Monitor
+
+on:
+  schedule:
+    # Run every 20 minutes from 6 AM to midnight (Israel time)
+    - cron: '*/20 6-23 * * *'
+  
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  monitor-yad2:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Setup Chrome for Selenium
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: stable
+    
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-selenium-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-selenium-
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
+        pip install selenium>=4.15.0
+        pip install webdriver-manager>=4.0.1
+    
+    - name: Restore Yad2 monitoring data
+      id: cache-restore
+      uses: actions/cache@v4
+      with:
+        path: yad2_data.json
+        key: yad2-data-${{ github.run_number }}
+        restore-keys: |
+          yad2-data-
+    
+    - name: Show current status
+      run: |
+        echo "🚗 Yad2 Monitor Status"
+        echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
+        if [ -f yad2_data.json ]; then
+          echo "Previous data found:"
+          cat yad2_data.json | python3 -c "import json,sys;data=json.load(sys.stdin);print(f\"Last total: {data.get('last_total', 0)}\");print(f\"Last check: {data.get('last_check', 'Never')}\");print(f\"History entries: {len(data.get('history', []))}\")"
+        else
+          echo "First run - no previous data"
+        fi
+    
+    - name: Run Yad2 monitor
+      env:
+        CAR_LISTING_URL: ${{ secrets.CAR_LISTING_URL }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        STORAGE_FILE: yad2_data.json
+      run: |
+        echo "Starting Yad2 monitor..."
+        python yad2_monitor.py
+    
+    - name: Save monitoring data
+      if: always()
+      uses: actions/cache@v4
+      with:
+        path: yad2_data.json
+        key: yad2-data-${{ github.run_number }}
+    
+    - name: Show results
+      if: always()
+      run: |
+        echo "=== Monitor Results ==="
+        if [ -f yad2_data.json ]; then
+          echo "Updated data:"
+          cat yad2_data.json | python3 -m json.tool | head -20
+        fi
+        echo "====================="
